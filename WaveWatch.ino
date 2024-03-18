@@ -22,7 +22,7 @@ String relayState = "OFF";
                                                   // trig | echo | height | diameter | maxLiters
 UltrasonicSensor sensor1(0, 4, 0.6, 1, 1000);     // D3   | D2   | 0.6    | 1        | 1000
 // UltrasonicSensor sensor2(13, 12, 0.5, 1, 1000);   // D7   | D6   | 1      | 1        | 1000
-UltrasonicSensor sensor2(2, 14, 0.5, 1, 1000); // D4   | D5   | 0.5    | 1        | 1000
+UltrasonicSensor sensor2(2, 14, 0.6, 1, 1000); // D4   | D5   | 0.6    | 1        | 1000
 AsyncWebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
 DNSServer dns;
@@ -31,7 +31,6 @@ StaticJsonDocument<200> doc_rx;
 StaticJsonDocument<200> doc_stored;
 OneButton button(A0, false); 
 
-// WiFi credentials (to be changed for commercial use)
 #define BUTTON_SHORT_PRESS 1
 #define BUTTON_LONG_PRESS 2
 #define BUTTON_DOUBLE_PRESS 3
@@ -46,8 +45,6 @@ String getPercentage() {
   object["sensor2"] = sensor2.percentage;
   serializeJson(doc_tx, jsonString);
 
-  Serial.print("Water Level (%): ");
-  Serial.println(jsonString);
   return String(jsonString);
 }
 String getLiters() {
@@ -58,9 +55,7 @@ String getLiters() {
   object["sensor1"] = sensor1.liters;
   object["sensor2"] = sensor2.liters;
   serializeJson(doc_tx, jsonString);
-
-  Serial.print("Liters (L): ");
-  Serial.println(jsonString);
+  
   return String(jsonString);
 }
 String getRelayState() {
@@ -132,7 +127,11 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
           return;
         } 
         if (String(commandName) == "AUTO_PUMP_STATE") {
-          autoPumpContollerActive = commandData;
+          if (String(commandData) == "ON") {
+            autoPumpContollerActive = true;
+          } else if (String(commandData) == "OFF") {
+            autoPumpContollerActive = false;
+          }
           return;
         }
       }
@@ -188,6 +187,18 @@ void setup() {
   server.on("/Scripts/backend.js", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(LittleFS, "/Scripts/backend.js", "text/javascript");
   });
+  server.on("/wave.png", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/wave.png", "image/png");
+  });
+  server.on("/menu-outline.svg", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/menu-outline.svg", "image/svg+xml");
+  });
+  server.on("/information-circle-outline.svg", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/information-circle-outline.svg", "image/svg+xml");
+  });
+  server.on("/contrast-outline.svg", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/contrast-outline.svg", "image/svg+xml");
+  });
   server.on("/percentage", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/plain", getPercentage().c_str());
   });
@@ -202,6 +213,7 @@ void setup() {
   getRelayState();
   server.begin();
 }
+bool autoPumpReset = true;
 void loop() {
   button.tick(analogRead(button.pin())/1024);
 
@@ -217,10 +229,16 @@ void loop() {
   if (autoPumpContollerActive) {
     if (digitalRead(autoPumpIndicator) == LOW) {
       digitalWrite(autoPumpIndicator, HIGH);
+      sendWSData("AUTO_PUMP_STATE", "ON");
+      autoPumpReset = true;
       delay(2000);
     }
     autoPumpContoller();
   } else {
+    if (autoPumpReset) {
+      sendWSData("AUTO_PUMP_STATE", "OFF");
+      autoPumpReset = false;
+    }
     digitalWrite(autoPumpIndicator, LOW);
   }
 

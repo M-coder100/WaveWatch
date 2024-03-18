@@ -1,36 +1,525 @@
-html {
-  font-family: Arial;
-  display: inline-block;
-  margin: 0px auto;
-  text-align: center;
+* {
+	box-sizing: border-box;
+	font-family: sans-serif;
+	padding: 0;
+	margin: 0;
 }
-h1 {
-  color: #0f3376;
-  padding: 2vh;
+body {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100vh;
+	color: #fff;
+	flex-direction: column;
+	/* background: url(/testBG.png) no-repeat center center fixed; 
+	-webkit-background-size: cover;
+	-moz-background-size: cover;
+	-o-background-size: cover;  
+	background-size: cover; */
+	background: #0099ff;
+	scroll-behavior: smooth;
+	transition: background .5s ease;
 }
-p {
-  font-size: 1.5rem;
+.waterPercentage .minimal {
+	display: none;
+	animation: show_hide .5s ease forwards reverse;
 }
-.button {
-  display: inline-block;
-  background-color: #008cba;
-  border: none;
-  border-radius: 4px;
-  color: white;
-  padding: 16px 40px;
-  text-decoration: none;
-  font-size: 30px;
-  margin: 2px;
-  cursor: pointer;
+
+.tankContainer {
+	position: sticky;
+	top: 20px;
+	left: 0px;
+	bottom: 0px;
+	gap: 20px;
+	height: fit-content;
+	width: 100vw;
+	display: flex;
+	justify-content: space-around;
+	align-items: center;
+	flex-direction: column;
 }
-.button2 {
-  background-color: #f44336;
+
+.tankDetails {
+	background: #1d1e22cd;
+	padding-inline: 20px;
+	padding-block: 15px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 20px;
+	border-radius: 15px;
+	-webkit-backdrop-filter: blur(50px);
+	backdrop-filter: blur(50px);
+	margin-bottom: 80px;
+	animation: scaleNormal 1s ease forwards;
 }
-.units {
-  font-size: 1.2rem;
+.tankDetails .infoUpper {
+	display: flex;
+	font-weight: 700;
+	align-items: center;
+	width: max-content;
+	justify-content: space-between;
 }
-.sensor-labels {
-  font-size: 1.5rem;
-  vertical-align: middle;
-  padding-bottom: 15px;
+.tankDetails .infoUpper > div {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.tankDetails .infoUpper .tankTagName {
+	background: #1d1e22cd;
+	padding: 5px 10px;
+	border-radius: 10px;
+	font-size: 0.8em;
+	font-weight: 500;
+	margin-right: 20px;
+	display: inline-block;
+}
+.tankDetails .infoUpper .tankTagName.smartFlow {
+	background: linear-gradient(90deg,#0b88db, #0055ff);
+}
+.tankDetails .infoUpper .moreOptions {
+	all: unset;
+	font-size: 1.2em;
+	-webkit-user-select: none;
+	user-select: none;
+	cursor: pointer;
+	height: 20px;
+	width: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.tankDetails:not(.minimal) .waterPercentage {
+	position: relative;
+	width: 150px;
+	height: 150px;
+	border-radius: 50%;
+	filter: none;
+	background: conic-gradient(#0099ff, #0400ff 300deg, #1d1e22 0deg);
+}
+.waterPercentage::after {
+	content: "";
+	width: 0;
+	height: 0;
+	background: #1d1e22a1;
+	-webkit-backdrop-filter: blur(50px);
+	backdrop-filter: blur(50px);
+	border-radius: 50%;
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	animation: afterElm 1s ease forwards;
+}
+.waterPercentage > div:not(.minimal) {
+	position: absolute;
+	top: 46%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	z-index: 1;
+	font-size: 1.25em;
+	font-weight: 400;
+	display: flex;
+	transition: all .5s ease;
+}
+.waterPercentage h3 {
+	font-size: 1em;
+	transform: scale(1.5);
+	font-weight: 500;
+	margin-right: 8px;
+}
+.waterPercentage h4 {
+	position: absolute;
+	top: 60%;
+	left: 50%;
+	z-index: 1;
+	transform: translateX(-50%);
+}
+.waterFlowDetails {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	flex-direction: column;
+	animation: show_hide .5s ease forwards reverse;
+}
+.waterFlowDetails .waterLevelInfoValue {
+	font-family: monospace;
+	font-weight: 600;
+	font-size: 1.1em;
+}
+
+
+/* MINIMAL */
+.tankDetails.minimal {
+	margin-bottom: 0;
+	animation: scaleMinimal 1s ease forwards;
+}
+.tankDetails.minimal .infoUpper {
+	width: 100%;
+}
+.tankDetails.minimal .waterFlowDetails, .tankDetails.minimal .waterPercentage h4, .tankDetails.minimal .waterPercentage::after {
+	display: none;
+}
+.tankDetails.minimal .waterPercentage > div {
+	top: 50%;
+	font-size: 1em;
+	left: 65%;
+	font-weight: 600;
+}
+.tankDetails.minimal .waterPercentage {
+	position: absolute;
+	height: 100%;
+	width: 100%;
+	top: 0;
+	display: flex;
+	justify-content: center;
+	align-items: flex-end;
+	flex-direction: column;
+	z-index: -1;
+	background: transparent !important;
+}
+.tankDetails.minimal .waterPercentage h3 {
+	font-weight: inherit;
+	transform: scale(1);
+	right: 0;
+}
+.tankDetails.minimal .waterPercentage .minimal {
+	width: 32vw;
+	border-radius: 10px;
+	overflow: hidden;
+	display: flex;
+	background: linear-gradient(90deg, transparent, #1d1e22cd);
+	margin-right: 50px;
+	border: 2px solid #1d1e22cd;
+}
+.tankDetails.minimal .waterPercentage .minimal .progressBar {
+	width: 0;
+	border-right: 2px solid #1d1e22cd;
+	height: 30px;
+	border-radius: 10px;
+	background: linear-gradient(90deg,#0b88db, #0055ff);
+	transition: width .5s ease;
+}
+
+@keyframes scaleMinimal {
+	from {
+		width: 220px;
+		height: 290px;
+	}
+	to {
+		height: 55px;
+		width: 90vw;
+	}
+}
+@keyframes scaleNormal {
+	from {
+		height: 55px;
+		width: 90vw;
+	}
+	to {
+		width: 220px;
+		height: 290px;
+	}
+}
+@keyframes afterElm {
+	to {
+		width: 100px;
+		height: 100px;
+	}
+}
+@keyframes show_hide {
+	to {
+		opacity: 0;
+	}
+}
+.waterLevelBackdrop {
+	position: absolute;
+	width: 100vw;
+	height: 100vh;
+	z-index: -1;
+	transition: all .5s ease;
+}
+.waterLevelBackdrop .wave {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	width: 100vw;
+	height: 0vh;
+	background: url(../wave.png) repeat-x;
+	background-size: 1000px 100px;
+	transition: all .5s ease;
+	animation: animate 4s ease-in-out infinite;
+	animation-delay: calc(var(--i) * 0.25s);
+}
+.wave#wave1 {
+	z-index: 5;
+	opacity: 1;
+	background-position-x: 400px;
+}
+.wave#wave2 {
+	z-index: 4;
+	opacity: 0.5;
+	background-position-x: 300px;
+}
+.wave#wave3 {
+	z-index: 3;
+	opacity: 0.2;
+	background-position-x: 200px;
+}
+.wave#wave4 {
+	z-index: 2;
+	opacity: 0.7;
+	background-position-x: 100px;
+}
+@keyframes animate {
+	0%, 100% {
+		transform: translateY(0px);
+	}
+	50% {
+		transform: translateY(10px);
+	}
+}
+
+.waterLevelBackdrop .wave::after {
+	content: "";
+	display: flex;
+	position: relative;
+	top: 10vh;
+	height: 210vh;
+	width: 100vw;
+	background: white;
+}
+
+
+main {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	height: 0;
+	position: sticky;
+	top: 30vh;
+}
+main .control {
+	width: 90vw;
+	padding: 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 15px;
+	border-radius: 15px;
+	margin-top: 20px;
+	-webkit-backdrop-filter: blur(50px);
+	backdrop-filter: blur(50px);
+	background: #1d1e22cd;
+}
+main .control .info {
+	padding: 10px;
+	background: #0099ff45;
+	border: 1px solid #0099ff;
+	color: #ddd;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+main .control .info::before {
+    content: url("/../information-circle-outline.svg");
+	height: 30px;
+	width: 60px;
+	filter: invert(50%) sepia(78%) saturate(4548%) hue-rotate(184deg) brightness(124%) contrast(105%);
+}
+
+
+main .control h2 {
+	text-transform: capitalize;
+}
+
+.pumpControls .buttonContainer {
+	display: flex;
+	gap: 15px;
+}
+main .control .header {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+}
+.pumpControls .buttonContainer button {
+	width: 100%;
+	padding: 10px;
+	border-radius: 10px;
+	font-weight: bold;
+	color: #eee;
+	font-size: larger;
+	text-transform: uppercase;
+	cursor: pointer;
+	background: #1d1e22cd;
+	border: 2px solid #15B166;
+}
+.pumpControls .buttonContainer button:hover {
+	filter: brightness(120%);
+}
+.pumpControls .buttonContainer button#pumpOff {
+	border: 2px solid #EA5753;
+}
+.pumpControls .buttonContainer button#pumpOn.active {
+	color: #fff;
+	background: #15B166;
+}
+.pumpControls .buttonContainer button#pumpOff.active {
+	color: #fff;
+	background: #EA5753;
+}
+.pumpControls span {
+	background: #1d1e22cd;
+	padding: 6px 8px;
+	text-transform: uppercase;
+	font-weight: bold;
+	color: #a1a1a1;
+	font-size: small;
+	border-radius: 10px;
+}
+.smartFlowControls #smartFlowInfo .smartFlowTankInfo {
+	padding: 15px;
+	background: #191919;
+	border-radius: 10px;
+	margin-top: 10px;
+	box-shadow: 0 0 50px #0055ff1f;
+	border-bottom: 1px solid #0055ff;
+}
+.smartFlowControls #smartFlowInfo .smartFlowTankInfo summary {
+	position: relative;
+	filter: brightness(80%);
+	color: #fff;
+}
+.smartFlowControls #smartFlowInfo .smartFlowTankInfo.active summary {
+	filter: brightness(120%);
+}
+.smartFlowControls #smartFlowInfo .smartFlowTankInfo summary .name {
+	font-weight: bold;
+	font-size: 1.1em;
+	margin-right: 10px;
+}
+.smartFlowControls #smartFlowInfo .smartFlowTankInfo summary .edit {
+	color: #0099ff;
+	position: absolute;
+	right: 0;
+	text-decoration: underline;
+}
+.smartFlowControls #smartFlowInfo .smartFlowTankInfo summary .toggle::after {
+	content: "ENABLE";
+	padding: 5px 10px;
+	border-radius: 10px;
+	font-size: 0.8em;
+	font-weight: 500;
+	display: inline-block;
+	border: 1px solid #0055ff;
+}	
+.smartFlowControls #smartFlowInfo ul li {
+	display: flex;
+	justify-content: space-between;
+	margin-top: 15px;
+}
+.smartFlowControls #smartFlowInfo ul li span {
+	color: #0b88db;
+}
+.smartFlowControls #smartFlowInfo .smartFlowTankInfo.active summary .toggle::after {
+	content: "DISABLE";
+	background: linear-gradient(90deg,#0b88db, #0055ff);
+}
+
+
+
+/* Loader */
+.loader {
+	position: fixed;
+	height: 100vh;
+	width: 100vw;
+	background: linear-gradient(90deg,#0b88db, #0055ff);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.loader-hidden {
+	animation: loaderHide 2s forwards;
+}
+@keyframes loaderHide {
+	80% {
+		filter: hue-rotate(360deg);
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+
+
+
+/* For toggle */
+input[type=checkbox]{
+	height: 0;
+	width: 0;
+	visibility: hidden;
+}
+
+label {
+	cursor: pointer;
+	text-indent: -9999px;
+	width: 50px;
+	height: 30px;
+	background: #1d1e22cd;
+	border-radius: 100px;
+	position: relative;
+	display: flex;
+	outline: 1px solid #eee;
+}
+
+label:after {
+	content: '';
+	position: absolute;
+	top: 5px;
+	left: 5px;
+	width: 20px;
+	height: 20px;
+	background: #fff;
+	border-radius: 90px;
+	transition: 0.3s;
+}
+
+input:checked + label {
+	background: linear-gradient(90deg,#0b88db, #0055ff);
+}
+
+input:checked + label:after {
+	left: calc(100% - 5px);
+	transform: translateX(-100%);
+}
+
+label:active:after {
+	width: 35px;
+}
+
+nav {
+	position: absolute;
+	top: 0;
+	width: 100vw;
+	display: flex;
+	justify-content: center;
+}
+nav h3 {
+	background: #000;
+
+	border-radius: 0px 0px 10px 10px;
+	padding: 10px 20px;
+}
+nav .navOption {
+	position: absolute;
+	top: 0;
+	margin: 20px;
+	height: 20px;
+	width: 20px;
+}
+nav .navOption.right {
+	right: 0;
+}
+nav .navOption.left {
+	left: 0;
 }

@@ -7,6 +7,8 @@
 #include <ArduinoJson.h>
 #include <OneButton.h>
 #include <ESPAsyncWiFiManager.h>
+#include <ESP8266mDNS.h>
+#include <EEPROM.h>
 
 // Custom library made by myself for this project
 #include <ultrasonicSensor.h>
@@ -15,26 +17,58 @@ const int relayPump = D0;
 const int buzzer = D1;
 const int autoPumpIndicator = D8;
 
-int percentage, liters = 0;
+int percentage;
 int tolerance = 50;
-bool autoPumpContollerActive = true;
-String relayState = "OFF";
-                                                  // trig | echo | height | diameter | maxLiters
-UltrasonicSensor sensor1(0, 4, 0.6, 1, 1000);     // D3   | D2   | 0.6    | 1        | 1000
-// UltrasonicSensor sensor2(13, 12, 0.5, 1, 1000);   // D7   | D6   | 1      | 1        | 1000
-UltrasonicSensor sensor2(2, 14, 0.6, 1, 1000); // D4   | D5   | 0.6    | 1        | 1000
-AsyncWebServer server(80);
-WebSocketsServer webSocket = WebSocketsServer(81);
+bool smartFlowListenActive = true;
+bool isFirstBoot = true;
+
+bool isWiFiSetupCompleted = false;
+const int wifiManagerTimeout = 120; // Timeout for on demand config portal in seconds
+unsigned long wifiConnectionStartTime = millis();
+
+// Loop Interval milliseconds
+const long buttonInterval = 10;  // Interval for button.tick() in milliseconds
+const long sensorInterval = 100; // Interval for sensor readings in milliseconds
+const long smartFlowInterval = 100; // Interval for smartFlow in milliseconds
+const long wifiConnectionInterval = 500; // Interval for sensor readings in milliseconds
+
+// Loop Previous milliseconds
+unsigned long buttonPreviousMillis = 0;
+unsigned long sensorPreviousMillis = 0;
+unsigned long smartFlowPreviousMillis = 0;
+unsigned long wifiConnectionPreviousMillis = 0; // Interval for sensor readings in milliseconds
+
+
+struct Settings {
+  char ssid[32];
+  char password[64];
+  IPAddress ip;
+  IPAddress gateway;
+  IPAddress subnet;
+  IPAddress dns1;
+  IPAddress dns2;
+};
+Settings settings;
+
+                                          // trig | echo | height |
+UltrasonicSensor sensor1(0, 4, 0.6);      // D3   | D2   | 0.6    |
+UltrasonicSensor sensor2(2, 14, 0.6);     // D4   | D5   | 0.6    |
+UltrasonicSensor sensor3(13, 12, 0.6);    // D7   | D6   | 1      |
+int sensIterations = 10;
+
 DNSServer dns;
+AsyncWebServer server(80);
+AsyncWiFiManager wm(&server, &dns);
+WebSocketsServer webSocket = WebSocketsServer(81);
+
 StaticJsonDocument<200> doc_tx;
 StaticJsonDocument<200> doc_rx;
 StaticJsonDocument<200> doc_stored;
+
 OneButton button(A0, false); 
 
-#define BUTTON_SHORT_PRESS 1
-#define BUTTON_LONG_PRESS 2
-#define BUTTON_DOUBLE_PRESS 3
-
+String state = "OFF"; // Initial Pump State
+String wifiConnectionState = "DISCONNECTED";
 
 String getPercentage() {
   String jsonString = "";
@@ -47,136 +81,174 @@ String getPercentage() {
 
   return String(jsonString);
 }
-String getLiters() {
-  String jsonString = "";
-  JsonObject object = doc_tx.to<JsonObject>();
-
-  object["name"] = "SENSOR_LITERS";
-  object["sensor1"] = sensor1.liters;
-  object["sensor2"] = sensor2.liters;
-  serializeJson(doc_tx, jsonString);
-  
-  return String(jsonString);
-}
 String getRelayState() {
+  String relayState = "OFF";
   digitalRead(relayPump) ? relayState = "ON" : relayState = "OFF";
   return relayState;
 }
-String processor(const String &var) {
-  Serial.print("VAR: ");
-  Serial.println(var);
-  if (var == "STATE")
-  {
-    return getRelayState();
-  }
-  if (var == "PERCENTAGE")
-  {
-    return (String) sensor1.percentage;
-  }
-  if (var == "MILLILITERS")
-  {
-    return (String) sensor1.liters;
-  }
-  return "ERROR";
-}
 
-// Initialize Functions
+// Setup Functions
 void initializePins() {
   pinMode(relayPump, OUTPUT);
   pinMode(buzzer, OUTPUT);
   pinMode(autoPumpIndicator, OUTPUT);
+  pinMode(2, OUTPUT);
 }
-void connectToWiFi(String ssid, String password) {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
+void mountFileSystem() {
+  LittleFS.begin();
+  if (!LittleFS.begin()) {
+    Serial.println("File does not exist");
+  } else if (!LittleFS.exists("/index.html")) {
+    Serial.println("Failed to mount file system");
+  } else {
+    Serial.println("File system mounted successfully!");
+  }
+}
+void handleButtonPress() {
+  button.attachClick(singleclick);
+  button.attachDoubleClick(doubleclick);
+  button.attachLongPressStop(longclick);
+}
+bool loadSettings() {
+  // Open settings file
+  File file = LittleFS.open("/settings.json", "r");
+  if (!file) {
+    Serial.println("Failed to open settings file");
+    return false;
   }
 
-  Serial.println("");
-  Serial.print("Connected to: ");
-  Serial.println(ssid);
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
+  // Read settings from file
+  size_t size = file.size();
+  if (size == 0) {
+    Serial.println("Settings file is empty");
+    file.close();
+    return false;
+  }
+
+  // Allocate a buffer to store the JSON data
+  std::unique_ptr<char[]> buf(new char[size]);
+  file.readBytes(buf.get(), size);
+  file.close();
+
+  // Parse JSON data
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, buf.get());
+  if (error) {
+    Serial.println("Failed to parse JSON");
+    return false;
+  }
+
+  // Copy settings from JSON to settings struct
+  strcpy(settings.ssid, doc["ssid"]);
+  strcpy(settings.password, doc["password"]);
+
+  // WiFi Static Ip Config
+  const char* ipStr = doc["ip"];
+  const char* gatewayStr = doc["gateway"];
+  const char* subnetStr = doc["subnet"];
+  const char* dns1Str = doc["dns1"];
+  const char* dns2Str = doc["dns2"];
+
+  IPAddress ip, gateway, subnet, dns1, dns2;
+  if (!ip.fromString(ipStr) || !gateway.fromString(gatewayStr) ||
+    !subnet.fromString(subnetStr) || !dns1.fromString(dns1Str) || !dns2.fromString(dns2Str)) {
+    Serial.println("Failed to convert IP address strings");
+    return false;
+  }
+  WiFi.config(ip, gateway, subnet, dns1, dns2);
+
+  return true;
+}
+
+// IOT Connection Functions
+void connectToWifi() {
+  if (wifiConnectionState == "DISCONNECTED") {
+    Serial.println("");
+    Serial.print("Connecting to SSID: ");
+    Serial.println(settings.ssid);
+    Serial.print("Password: ");
+    Serial.println(settings.password);
+
+    Serial.println();
+
+    // WiFi.config(settings.ip, settings.gateway, settings.subnet, settings.dns1, settings.dns2);
+    WiFi.begin(settings.ssid, settings.password);
+  }
+
+  wifiConnectionState = "CONNECTING";
+  if (millis() - wifiConnectionStartTime > 10000) {
+    // If connection attempt takes more than 10 seconds, assume failure
+    Serial.println("Failed to connect to WiFi. Enter setup mode.");
+    wifiConnectionState = "FAILURE";
+    return;
+  }
+  Serial.print(".");
+}
+void startWiFiManagerConfigPortal() {
+  wm.resetSettings();
+
+  IPAddress staticIP(192, 168, 0, 199); // Set your desired static IP address
+  IPAddress gateway(192, 168, 0, 1);    // Set your gateway IP address
+  IPAddress subnet(255, 255, 255, 0);   // Set your subnet mask
+  IPAddress dns1(8, 8, 8, 8);           // Set your DNS server IP address
+  IPAddress dns2(8, 8, 4, 4);           // Set your DNS server IP address
+  wm.setSTAStaticIPConfig(staticIP, gateway, subnet, dns1, dns2);
+
+  // set configportal timeout 
+  wm.setConfigPortalTimeout(wifiManagerTimeout);
+
+  if (!wm.startConfigPortal("WaveWatch", NULL, 2)) {
+    Serial.println("failed to connect and hit timeout");
+    delay(3000);
+    // reset and try again, or maybe put it to deep sleep
+    ESP.restart();
+    delay(5000);
+  }
+  buzzerSFX(1);
+
+  StaticJsonDocument<256> doc;
+  doc["ssid"] = WiFi.SSID();
+  doc["password"] = WiFi.psk();
+  
+  doc["ip"] = WiFi.localIP().toString();
+  doc["gateway"] = WiFi.gatewayIP().toString();
+  doc["subnet"] = WiFi.subnetMask().toString();
+  doc["dns1"] = WiFi.dnsIP(0).toString();
+  doc["dns2"] = WiFi.dnsIP(1).toString();
+
+  isWiFiSetupCompleted = false;
+  saveSettings(doc);
+}
+void handleWiFiConnected() {
+  if (!isWiFiSetupCompleted) {
+      wifiConnectionState = "CONNECTED";
+      digitalWrite(2, LOW);
+
+      Serial.println("");
+      Serial.print("Connected to: ");
+      Serial.println(WiFi.SSID());
+      Serial.print("IP Address: ");
+      Serial.println(WiFi.localIP());
+      Serial.println("");
+
+      initializeWebSocket();
+      handleServerRequests();
+      server.begin();
+      MDNS.begin("wavewatch");
+      Serial.println("WiFi Setup Completed!");
+
+      isWiFiSetupCompleted = true;
+    }
+    webSocket.loop();
+    MDNS.update();
 }
 void initializeWebSocket() {
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
 }
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
-    case WStype_TEXT:
-
-      // Handle incoming text message from the client
-      DeserializationError error = deserializeJson(doc_rx, payload);
-      if (error) {
-        Serial.println("ERR: Something went wrong while deserializing the data");
-        return;
-      } else {
-        
-        const char* commandName = doc_rx["name"];
-        const char* commandData = doc_rx["data"];
-
-        Serial.print(commandData);
-        if (String(commandName) == "PUMP_STATE") {
-          setPumpState(String(commandData));
-          autoPumpContollerActive = false;
-          return;
-        } 
-        if (String(commandName) == "AUTO_PUMP_STATE") {
-          if (String(commandData) == "ON") {
-            autoPumpContollerActive = true;
-          } else if (String(commandData) == "OFF") {
-            autoPumpContollerActive = false;
-          }
-          return;
-        }
-      }
-
-      break;
-  }
-}
-int mountFileSystem() {
-  LittleFS.begin();
-  if (!LittleFS.begin()) return -1;
-  if (!LittleFS.exists("/index.html")) return 1;
-  return 0;
-}
-
-AsyncWiFiManager wifiManager(&server, &dns);
-void setup() {
-  Serial.begin(115200);
-
-  wifiManager.autoConnect("WaveWatch");
-  connectToWiFi(WiFi.SSID(), WiFi.psk());
-
-  // Runs only after wifi gets connected 👇
-  initializeWebSocket();
-  initializePins();
-  int errorCode = mountFileSystem();
-  if (errorCode == 1) {
-    Serial.println("File does not exist");
-    return;
-  } else if (errorCode == -1) {
-    Serial.println("Failed to mount file system");
-    return;
-  } else Serial.println("File system mounted successfully!");
-
+void handleServerRequests() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(LittleFS, "/index.html", "text/html", false, processor);          
-  });
-  server.on("/stored", HTTP_GET, [](AsyncWebServerRequest *request) {
-    doc_stored["autoPumpContollerActive"] = autoPumpContollerActive;
-    doc_stored["key2"] = 42;
-
-    // Convert the JSON object to a string
-    String jsonData;
-    serializeJson(doc_stored, jsonData);
-    
-    request->send(200, "application/json", jsonData);
+    request->send(LittleFS, "/index.html", "text/html", false);          
   });
   server.on("/Styles/styles.css", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(LittleFS, "/Styles/styles.css", "text/css");
@@ -202,47 +274,77 @@ void setup() {
   server.on("/percentage", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/plain", getPercentage().c_str());
   });
-  server.on("/liters", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/plain", getLiters().c_str());
-  });
-
-  button.attachClick(singleclick);
-  button.attachDoubleClick(doubleclick);
-  button.attachLongPressStop(longclick);
-
-  getRelayState();
-  server.begin();
 }
-bool autoPumpReset = true;
-void loop() {
-  button.tick(analogRead(button.pin())/1024);
 
-  webSocket.loop();
-  sensor1.sense();
-  sensor1.getPercentage();
-  sensor1.getLiters();
-
-  sensor2.sense();
-  sensor2.getPercentage();
-  sensor2.getLiters();
-
-  if (autoPumpContollerActive) {
-    if (digitalRead(autoPumpIndicator) == LOW) {
-      digitalWrite(autoPumpIndicator, HIGH);
-      sendWSData("AUTO_PUMP_STATE", "ON");
-      autoPumpReset = true;
-      delay(2000);
-    }
-    autoPumpContoller();
-  } else {
-    if (autoPumpReset) {
-      sendWSData("AUTO_PUMP_STATE", "OFF");
-      autoPumpReset = false;
-    }
-    digitalWrite(autoPumpIndicator, LOW);
+// Loop Functions
+void handleButtonLoop(unsigned long currentMillis) {
+  // Button interval 10ms
+  if (currentMillis - buttonPreviousMillis >= buttonInterval) {
+    buttonPreviousMillis = currentMillis;
+    button.tick(analogRead(button.pin()) / 1024);
   }
+}
+void handleSensorLoop(unsigned long currentMillis) {
+  // Sensor interval 100ms
+  if ((currentMillis - sensorPreviousMillis >= sensorInterval)) {
+    sensorPreviousMillis = currentMillis;
 
-  delay(10);
+    sensor1.sense();
+    sensor1.getPercentage(sensIterations);
+
+    sensor2.sense();
+    sensor2.getPercentage(sensIterations);
+    
+    sensor3.sense();
+    sensor3.getPercentage(sensIterations);
+  }
+}
+void handleSmartFlowLoop(unsigned long currentMillis) {
+  // Same interval as the sensors
+  if ((currentMillis - smartFlowPreviousMillis >= smartFlowInterval)) {
+    smartFlowPreviousMillis = currentMillis;
+    if (smartFlowListenActive) {
+      if (digitalRead(autoPumpIndicator) == LOW) {
+        digitalWrite(autoPumpIndicator, HIGH);
+        sendWSData("AUTO_PUMP_STATE", "ON");
+      }
+      smartFlowListen();
+    } else {
+      if (digitalRead(autoPumpIndicator) == HIGH) {
+        sendWSData("AUTO_PUMP_STATE", "OFF");
+      }
+      digitalWrite(autoPumpIndicator, LOW);
+    }
+  }
+}
+void handleWiFiLoop(unsigned long currentMillis) {
+  if (WiFi.status() == WL_CONNECTED) {
+      handleWiFiConnected();
+  } else if (!(wifiConnectionState == "FAILURE") and (currentMillis - wifiConnectionPreviousMillis >= wifiConnectionInterval)) {
+    wifiConnectionPreviousMillis = currentMillis;
+    connectToWifi();
+  }
+  if (WiFi.status() != WL_CONNECTED) digitalWrite(2, HIGH);
+}
+
+void setup() {
+  delay(5000); // For Testing purposses only!!!
+
+  Serial.begin(115200);
+  initializePins();
+  mountFileSystem();
+  handleButtonPress();
+  getRelayState();
+
+  loadSettings();
+}
+void loop() {
+  unsigned long currentMillis = millis();
+
+  handleButtonLoop(currentMillis);
+  handleSensorLoop(currentMillis);
+  handleSmartFlowLoop(currentMillis);
+  handleWiFiLoop(currentMillis);
 }
 
 // Utility Functions
@@ -258,11 +360,13 @@ void setPumpState(String state) {
   
   sendWSData("PUMP_STATE", state);
 }
-
-String state = "OFF"; // Initial Pump State
-void autoPumpContoller() {
-  Serial.printf("Adjusted percentage 1: %d \n", sensor1.percentage);  
-  Serial.printf("Adjusted percentage 2: %d \n", sensor2.percentage);
+void smartFlowListen() {
+  Serial.print("Adjusted Percentage [1, 2, 3]: ");
+  Serial.print(sensor1.percentage);
+  Serial.print(", ");
+  Serial.print(sensor2.percentage);
+  Serial.print(", ");
+  Serial.println(sensor3.percentage);
 
   if (sensor2.percentage >= tolerance) {
     if (sensor1.percentage >= 90) {
@@ -286,7 +390,6 @@ void buzzerSFX(int iterationCount) {
     delay(1000);
   } 
 }
-
 void sendWSData(String name, String data) {
   String jsonString = "";
   JsonObject object = doc_tx.to<JsonObject>();
@@ -296,31 +399,79 @@ void sendWSData(String name, String data) {
   Serial.println(jsonString);
   webSocket.broadcastTXT(jsonString);
 }
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  switch(type) {
+    case WStype_TEXT:
+
+      // Handle incoming text message from the client
+      DeserializationError error = deserializeJson(doc_rx, payload);
+      if (error) {
+        Serial.println("ERR: Something went wrong while deserializing the data");
+        return;
+      } else {
+        
+        const char* commandName = doc_rx["name"];
+        const char* commandData = doc_rx["data"];
+
+        Serial.print(commandData);
+        if (String(commandName) == "PUMP_STATE") {
+          setPumpState(String(commandData));
+          smartFlowListenActive = false;
+          return;
+        } 
+        if (String(commandName) == "AUTO_PUMP_STATE") { // NEED TO BE CHANGED
+          if (String(commandData) == "ON") {
+            smartFlowListenActive = true;
+          } else if (String(commandData) == "OFF") {
+            smartFlowListenActive = false;
+          }
+          return;
+        }
+      }
+
+      break;
+  }
+}
+void saveSettings(StaticJsonDocument<256> doc) {
+  File file = LittleFS.open("/settings.json", "w");
+  if (!file) {
+    Serial.println("Failed to open settings file for writing");
+    return;
+  }
+
+  // Serialize JSON to file
+  if (serializeJson(doc, file) == 0) {
+    Serial.println("Failed to write JSON to settings file");
+    file.close();
+    return;
+  }
+
+  file.close();
+  Serial.println("Settings updated successfully");  
+}
 
 void doubleclick () {
   if (getRelayState() == "ON") {
-    Serial.print("Turining off the pump");
+    Serial.println("Turining off the pump");
     setPumpState("OFF");
   } else if (getRelayState() == "OFF") {
-    Serial.print("Turining on the pump");
+    Serial.println("Turining on the pump");
     setPumpState("ON");
   }
-  autoPumpContollerActive = false;
+  smartFlowListenActive = false;
 }
-bool isAutomaticClick = true;
 void singleclick () {
-  Serial.println("Single Clicked!");
-  if (isAutomaticClick) {
-    isAutomaticClick = false;
+  if (isFirstBoot) {
+    isFirstBoot = false;
     return;
   }
+  Serial.println("Single Clicked!");
   buzzerSFX(1);
-  autoPumpContollerActive = !autoPumpContollerActive;
-  Serial.printf("autoPumpContollerActive: %d \n", autoPumpContollerActive);
+  smartFlowListenActive = !smartFlowListenActive;
+  Serial.printf("smartFlowListenActive: %d \n", smartFlowListenActive);
 }
 void longclick () {
-  Serial.println("Long Clicked!");
+  digitalWrite(autoPumpIndicator, LOW);
   buzzerSFX(4);
-  wifiManager.resetSettings();
-  ESP.restart();
+  startWiFiManagerConfigPortal();
 }

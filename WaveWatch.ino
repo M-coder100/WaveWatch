@@ -76,19 +76,20 @@ String state = "OFF"; // Initial Pump State
 String wifiConnectionState = "DISCONNECTED";
 
 String getPercentage() {
-  String jsonString = "";
   JsonObject object = doc_tx.to<JsonObject>();
 
   object["name"] = "SENSOR_PERCENTAGE";
-  object["sensor1"] = sensor1.percentage;
-  object["sensor2"] = sensor2.percentage;
-  object["sensor3"] = sensor3.percentage;
+  for (int i = 0; i < 3; i++) {
+    object["sensor" + String(i + 1)] = sensors[i].percentage;
+  }
+
+  String jsonString = "";
   serializeJson(doc_tx, jsonString);
 
   return String(jsonString);
 }
 String getRelayState() {
-  String relayState = "OFF";
+  String relayState = "";
   digitalRead(relayPump) ? relayState = "ON" : relayState = "OFF";
   return relayState;
 }
@@ -405,7 +406,7 @@ void smartFlowListen() {
     }
   }
   Serial.println();
-  
+  if (!lastReason) lastReason = tanks[0].reason;
 
   // 3 Tank Priority Based Smart Flow Mode
   // Do Not Run If State Was Already Set To OFF
@@ -453,6 +454,7 @@ void singleclick () {
   buzzerSFX(1);
   smartFlowListenActive = !smartFlowListenActive;
   Serial.printf("smartFlowListenActive: %d \n", smartFlowListenActive);
+  delay(2000);
 }
 void longclick () {
   digitalWrite(autoPumpIndicator, LOW);

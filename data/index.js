@@ -213,21 +213,22 @@ function handleTankUI() {
     }
 }
 
+
 function init() {
     handleSettingsPopup();
     handleTankCarousel();
     handleTankUI();
     
     backend.onConnect = () => {
-        new PopupInline("info", "App Successfully Connected To WaveWatch Controller");
         handlePumpBtnPress();
         backend.init();
+        new PopupInline("success", "App Successfully Connected To WaveWatch Controller");
     }
     backend.onDisconnect = () => {
         new PopupInline("error", "App Disconnected From Server. This Could Be Because The Controller Is Switched OFF");
         setIndicatorColorUI("disconnected");
     }
-    backend.getLiveReading(1000);
+    backend.getLiveReading(250);
 }
 
 backend.sk.onMsg = msg => {
@@ -235,9 +236,10 @@ backend.sk.onMsg = msg => {
     if (msg.name == "GET_PUMP_STATE" || msg.name == "PUMP_STATE") {
         currentPumpState = msg.data == "ON" ? true : false;
     } else if (msg.name == "GET_SMART_FLOW_STATE" || msg.name == "SMART_FLOW_STATE") {
-        smartFlowToggle.checked = msg.data == "ON" ? true : false;
         if (msg.reason) {
-            new PopupInline("info", `Pump Turned ${msg.data} Due To ${msg.reason}`);
+            new PopupInline("info", `Pump Going To ${msg.data} Due To ${msg.reason}`);
+        } else {
+            smartFlowToggle.checked = msg.data == "ON" ? true : false;
         }
     }
     setIndicatorColorUI(currentPumpState);
@@ -264,11 +266,6 @@ function setSmartFlowState(boolean) {
     backend.send("SMART_FLOW_STATE", boolean ? "ON" : "OFF");
     setIndicatorColorUI(currentPumpState);
 }
-
-
-
-
-
 
 
 // Class Objects:
@@ -327,6 +324,8 @@ class PopupInline {
             iconName = popupType;
         } else if (popupType == "error") {
             iconName = "bug";
+        } else if (popupType == "success") {
+            iconName = "checkmark-circle";
         }
         
 

@@ -1,96 +1,175 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WaveWatch - WiFi leveler</title>
-    <link rel="stylesheet" href="Styles/styles.css" />
-  </head>
-  <body>
-    <nav>
-      <div class="navOption left">
-        <img src="/menu-outline.svg" alt="Menu" />
-      </div>
-      <h3>WaveWatch</h3>
-      <div class="navOption right" id="toggleDarkMode">
-        <img src="/contrast-outline.svg" alt="Toggle Dark Mode" />
-      </div>
-    </nav>
+<html lang="en" class="notranslate" translate="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google" content="notranslate">
+    <title>WaveWatch</title>
+    
+    <link rel="stylesheet" href="index.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="shortcut icon" href="src/logo72.png" type="image/x-icon">
 
-    <div class="tankContainer"></div>
+    <script defer type="module" src="backend.js"></script>
+    <script defer type="module" src="index.js"></script>
+    <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+    <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+</head>
+<body>
+    <section class="page1">
+        <div class="logo">
+            <h2>WaveWatch</h2>
+            <p>IOT Based Automatic Pump Controller</p>
+        </div>
+        <div class="tankCarousel">
+            <div class="tank">
+                <div class="circleOuter center">
+                    <div class="circleInner center">
+                        <div class="circleContent center">
+                            <div class="tankNameContainer">
+                                <div class="tankName">Tank 1</div>
+                                <div class="icon"><ion-icon name="settings-sharp"></ion-icon></div>
+                            </div>
+                            <div class="tankPercentage">0.0%</div>
+                            <p class="tankLiters">0L</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="tank">
+                <div class="circleOuter center">
+                    <div class="circleInner center">
+                        <div class="circleContent center">
+                            <div class="tankNameContainer">
+                                <div class="tankName">Tank 2</div>
+                                <div class="icon"><ion-icon name="settings-sharp"></ion-icon></div>
+                            </div>
+                            <div class="tankPercentage">0.0%</div>
+                            <p class="tankLiters">0L</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="tank">
+                <div class="circleOuter center">
+                    <div class="circleInner center">
+                        <div class="circleContent center">
+                            <div class="tankNameContainer">
+                                <div class="tankName">Tank 3</div>
+                                <div class="icon"><ion-icon name="settings-sharp"></ion-icon></div>
+                            </div>
+                            <div class="tankPercentage">0.0%</div>
+                            <p class="tankLiters">0L</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="control left">
+                <ion-icon name="chevron-back-circle"></ion-icon>
+            </div>
+            <div class="control right">
+                <ion-icon name="chevron-forward-circle"></ion-icon>
+            </div>
+        </div>
+    </section>
+    <section class="page2" id="settings">
+        <div class="popupContainer">
+            <div class="scrollAnchorContainer">
+                <a href="#settings">
+                    <img src="/src/scrollAnchor.png" alt="" srcset=""/>
+                </a>
+            </div>
+            <div class="pagination">
+                <div class="active"></div>
+                <div></div>
+                <div></div>
+            </div>
+            <div class="popupStack"></div>
+        </div>
+        <div class="manualPumpControls">
+            <button id="on">PUMP ON</button>
+            <button id="off">PUMP OFF</button>
+        </div>
+        <div class="message info">
+            <ion-icon name="information-circle"></ion-icon>
+            <p>Controlling the pump manually will turn OFF <i>Smart Flow</i></p>
+            <ion-icon name="close-outline" onclick="this.parentElement.remove()"></ion-icon>
+        </div>
+        <div class="tanksMinimal">
+            <div class="tank">
+                <div class="tankName">Tank 1</div>
+                <div class="tankPercentage">0%</div>
+                <ion-icon name="arrow-forward-circle"></ion-icon>
+                <div class="tankFill" style="height: 0%;"></div>
+            </div>
+            <div class="tank">
+                <div class="tankName">Tank 2</div>
+                <div class="tankPercentage">0%</div>
+                <ion-icon name="arrow-forward-circle"></ion-icon>
+                <div class="tankFill" style="height: 0%;"></div>
+            </div>
+            <div class="tank">
+                <div class="tankName">Tank 3</div>
+                <div class="tankPercentage">0%</div>
+                <ion-icon name="arrow-forward-circle"></ion-icon>
+                <div class="tankFill" style="height: 0%;"></div>
+            </div>
+        </div>
+        <div class="controllerSettings">
+            <h5>CONTROLLER SETTINGS</h5>
+            <div class="setting">
+                <h3 class="settingName">Smart Flow</h3>
+                <div class="container">
+                    <label class="toggle" for="smartFlowToggle">
+                        <input type="checkbox" id="smartFlowToggle"/>
+                        <span class="slider round"></span>
+                    </label>
+                    <ion-icon name="chevron-forward-sharp"></ion-icon>
+                </div>
+            </div>
+            <div class="setting">
+                <h3 class="settingName">Timed Operation</h3>
+                <div class="container">
+                    <label class="toggle" for="timedOperationToggle">
+                        <input type="checkbox" id="timedOperationToggle"/>
+                        <span class="slider round"></span>
+                    </label>
+                    <ion-icon name="chevron-forward-sharp"></ion-icon>
+                </div>
+            </div>
+        </div>
+        <div class="appSettings">
+            <h5>APP SETTINGS</h5>
+            <div class="setting">
+                <h3 class="settingName">Appearance</h3>
+                <ion-icon name="chevron-forward-sharp"></ion-icon>
+            </div>
+            <div class="setting">
+                <h3 class="settingName">General</h3>
+                <ion-icon name="chevron-forward-sharp"></ion-icon>
+            </div>
+            <div class="setting">
+                <h3 class="settingName">Support</h3>
+                <ion-icon name="open-outline"></ion-icon>
+            </div>
+        </div>
+    </section>
 
-    <div class="waterLevelBackdrop">
-      <div class="wave" id="wave1" style="--i: 1"></div>
-      <div class="wave" id="wave2" style="--i: 2"></div>
-      <div class="wave" id="wave3" style="--i: 3"></div>
-      <div class="wave" id="wave4" style="--i: 4"></div>
+    <div class="popupWindow">
+        <nav>
+            <ion-icon name="chevron-back-outline" id="settingsBackBtn"></ion-icon>
+            <div id="popupWindowTitle">Tank 1</div>
+            <ion-icon name="checkmark-outline" id="settingsSaveBtn"></ion-icon>
+        </nav>
+        <main id="popupRoot"></main>
     </div>
-
-    <main>
-      <div class="control pumpControls">
-        <div class="header">
-          <h2>Pump Controls</h2>
-          <span id="pumpConnectionInfo">Connected</span>
-        </div>
-        <div class="buttonContainer">
-          <button id="pumpOn">Pump ON</button>
-          <button id="pumpOff" class="active">Pump OFF</button>
-        </div>
-        <p>Control the pump manually</p>
-        <span class="info">Smart Flow feature will turn off when controlled manually</span>
-      </div>
-      <div class="control smartFlowControls">
-        <div class="header">
-          <h2>Smart Flow</h2>
-          <input type="checkbox" id="smartFlowToggle" />
-          <label for="smartFlowToggle">Toggle</label>
-        </div>
-        Control the pump automatically
-        <div id="smartFlowInfo"></div>
-      </div>
-    </main>
-    <div class="loader">
-      <svg
-      version="1.1"
-      xmlns="http://www.w3.org/2000/svg"
-      xmlns:xlink="http://www.w3.org/1999/xlink"
-      x="0px"
-      y="0px"
-      viewBox="-35 0 120 120"
-      enable-background="new 0 0 0 0"
-      preserveAspectRatio="xMaxYMin meet"
-      >
-        <circle fill="#fff" stroke="none" cx="6" cy="50" r="6">
-          <animate
-            attributeName="opacity"
-            dur="1s"
-            values="0;1;0"
-            repeatCount="indefinite"
-            begin="0.1"
-          />
-        </circle>
-        <circle fill="#fff" stroke="none" cx="26" cy="50" r="6">
-          <animate
-            attributeName="opacity"
-            dur="1s"
-            values="0;1;0"
-            repeatCount="indefinite"
-            begin="0.2"
-          />
-        </circle>
-        <circle fill="#fff" stroke="none" cx="46" cy="50" r="6">
-          <animate
-            attributeName="opacity"
-            dur="1s"
-            values="0;1;0"
-            repeatCount="indefinite"
-            begin="0.3"
-          />
-        </circle>
-      </svg>
-    </div>
-    <script type="module" src="Scripts/backend.js"></script>
-    <script type="module" src="Scripts/main.js"></script>
-  </body>
+    
+    <script>
+        if (!navigator.serviceWorker.controller) {
+            navigator.serviceWorker.register("/sw.js").then(function(reg) {
+                console.log("Service worker has been registered for scope: " + reg.scope);
+            });
+        }
+    </script>
+</body>
 </html>

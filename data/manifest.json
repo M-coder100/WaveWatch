@@ -1,0 +1,21 @@
+{
+    "name": "WaveWatch",
+    "short_name": "WaveWatch",
+    "theme_color": "#1A172A",
+    "background_color": "#1A172A",
+    "display": "standalone",
+    "scope": "/",
+    "start_url": "/",
+    "description": "WaveWatch: IOT Based Automatic Pump Controller",
+    "orientation": "any",
+    "icons": [
+        {
+            "src": "/src/logo72.png",
+            "sizes": "72x72"
+        },
+        {
+            "src": "/src/logo512.png",
+            "sizes": "512x512"
+        }
+    ]
+}

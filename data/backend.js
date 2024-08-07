@@ -3,6 +3,7 @@ class Backend {
     websocket;
     /** @type {string} - Private*/
     #gateway;
+    isConnected = false;
 
     constructor(gateway) {
         this.#gateway = gateway;
@@ -28,7 +29,11 @@ class Backend {
     */
     send(name, data) {
         let object = { name: name, data: data }
-        this.websocket.send(JSON.stringify(object));
+        try {
+            this.websocket.send(JSON.stringify(object));
+        } catch (error) {
+            this.sk.onError(error);
+        }
     }
 
     onConnect = () => {console.log("%c Connected", "color: aqua");};
@@ -49,11 +54,13 @@ class Backend {
                         eventFunc(JSON.parse(this.responseText));
                         if (isConnected == false) {
                             onConnect();
+                            this.isConnected = true;
                         }
                         isConnected = true;
                     } else {
                         if (isConnected == true) {
                             onDisconnect();
+                            this.isConnected = false;
                         }
                         isConnected = false;
                     }
@@ -62,8 +69,31 @@ class Backend {
             xhttpPercentage.send();
         }, interval);
     }
+    getTimerData(interval) {
+        var eventFunc = this.onTimerTick.bind(this); 
+        let lastSeconds = 0;
 
+        let intervalID = setInterval(() => {
+            var xhttpPercentage = new XMLHttpRequest();
+            xhttpPercentage.open("GET", "/timer", true);
+            
+            xhttpPercentage.onreadystatechange = function () {
+                if (this.readyState == 4) {
+                    if (this.status == 200) {
+                        let seconds = JSON.parse(this.responseText);
+                        if (lastSeconds != seconds) {
+                            eventFunc(seconds);
+                        }
+                        lastSeconds = seconds;
+                    }
+                }
+            };
+            xhttpPercentage.send();
+        }, interval);
+        return intervalID;
+    }
     onSensorData(res) { console.log(res) }
+    onTimerTick(res) { console.log(res) }
 
     async getSetting(settingName) {
         return fetch("./settings.json")
@@ -84,9 +114,7 @@ class Backend {
                         if (searchItems[1]) {
                             return settings[settingName][index][searchItems[0]][searchItems[1]];
                         }
-                        if (searchItems[0]) {
-                            return settings[settingName][index][searchItems[0]];
-                        }
+                        return settings[settingName][index][searchItems[0]];
                     }
                 };
             })
@@ -95,6 +123,17 @@ class Backend {
                 return null;
             });
     }
+    async saveSettings(settingName, data, index) {
+        let fileObject = fetch("./settings.json").then(res => res.json());
+        fileObject.then(settings => {
+            if (isFinite(index)) {
+                settings[settingName][index] = data;
+            } else {
+                settings[settingName] = data;
+            }
+            this.send("SETTINGS", JSON.stringify(settings));
+        })
+    }
     sk = {
         /** @type {Function} */
         onOpen: () => {
@@ -102,6 +141,9 @@ class Backend {
             console.log('Connection opened');
             this.send("GET_PUMP_STATE", true);
             this.send("GET_SMART_FLOW_STATE", true);
+            // this.send("GET_TIMER_ACTIVE", true);
+            // this.send("GET_TIMER_ACTION", true);
+            this.isConnected = true;
         },
         /** 
          * @type {Function} 
@@ -115,6 +157,7 @@ class Backend {
                 console.error(`Connection died`);
                 console.log("WebSocket Connection Lost", "The server may be down.");
             }
+            this.isConnected = false;
             setTimeout(() => this.init(), 2000);
         },
         /** @type {Function} */

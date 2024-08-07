@@ -17,7 +17,6 @@ const int relayPump = D0;
 const int buzzer = D1;
 const int autoPumpIndicator = D8;
 
-bool smartFlowListenActive = true;
 bool isFirstBoot = true;
 
 bool isWiFiSetupCompleted = false;
@@ -28,24 +27,25 @@ unsigned long wifiConnectionStartTime = millis();
 const long buttonInterval = 10;  // Interval for button.tick() in milliseconds
 const long sensorInterval = 250; // Interval for sensor readings in milliseconds
 const long smartFlowInterval = 250; // Interval for smartFlow in milliseconds
+const long timerInterval = 1000;
 const long wifiConnectionInterval = 500; // Interval for WiFi-reconnection in milliseconds
 
 // Loop Previous milliseconds
 unsigned long buttonPreviousMillis = 0;
 unsigned long sensorPreviousMillis = 0;
 unsigned long smartFlowPreviousMillis = 0;
+unsigned long timerPreviousMillis = 0;
 unsigned long wifiConnectionPreviousMillis = 0;
 
-struct Settings {
-  char ssid[32];
-  char password[64];
-  IPAddress ip;
-  IPAddress gateway;
-  IPAddress subnet;
-  IPAddress dns1;
-  IPAddress dns2;
-};
-Settings settings;
+char ssid[32];
+char password[64];
+bool smartFlowListenActive = false;
+bool isBuzzerActive = false;
+bool lastTimerState = false;
+bool timerState = false;
+int timerSeconds = -1;
+int timerAction = -1;
+int oneMinuteSaveCounter = 0;
 
                                           // trig | echo | height |
 UltrasonicSensor sensor1(0, 4, 0.6);      // D3   | D2   | 0.6    |
@@ -60,7 +60,6 @@ SmartFlowTank tank3(0, 100, 0, "Tank 3");
 UltrasonicSensor sensors[] = {sensor1, sensor2, sensor3};
 SmartFlowTank tanks[] = {tank1, tank2, tank3};
 
-
 DNSServer dns;
 AsyncWebServer server(80);
 AsyncWiFiManager wm(&server, &dns);
@@ -68,7 +67,6 @@ WebSocketsServer webSocket = WebSocketsServer(81);
 
 StaticJsonDocument<200> doc_tx;
 StaticJsonDocument<200> doc_rx;
-StaticJsonDocument<200> doc_stored;
 
 OneButton button(A0, false); 
 
@@ -87,6 +85,9 @@ String getPercentage() {
   serializeJson(doc_tx, jsonString);
 
   return String(jsonString);
+}
+String getTimer() {
+  return String(timerSeconds);
 }
 String getRelayState() {
   String relayState = "";
@@ -116,6 +117,44 @@ void handleButtonPress() {
   button.attachDoubleClick(doubleclick);
   button.attachLongPressStop(longclick);
 }
+void saveSettings(StaticJsonDocument<800> doc, String saveType) {
+  File settingsFile;
+  if (saveType == "write") {
+    settingsFile = LittleFS.open("/settings.json", "w");
+    if (!settingsFile) {
+      Serial.println("Failed to open settings settingsFile for writing");
+      return;
+    }
+
+    // Serialize JSON to settingsFile
+    settingsFile.seek(0);
+    if (serializeJson(doc, settingsFile) == 0) {
+      Serial.println("Failed to write JSON to settings settingsFile");
+      settingsFile.close();
+      return;
+    }
+  } else if (saveType == "modify") {
+    settingsFile = LittleFS.open("/settings.json", "r");
+    if (!settingsFile) {
+      Serial.println("Failed to open settings settingsFile for modifying");
+      return;
+    }
+    
+    StaticJsonDocument<800> settingsDoc;
+    deserializeJson(settingsDoc, settingsFile);
+    settingsFile.close();
+
+    for (JsonPair kvp : doc.as<JsonObject>()) {
+      const char* key = kvp.key().c_str();
+      settingsDoc[kvp.key()] = kvp.value();
+    }
+
+    settingsFile = LittleFS.open("/settings.json", "w");
+    serializeJson(settingsDoc, settingsFile);
+  }
+  settingsFile.close();
+  Serial.println("Settings Updated Successfully!");  
+}
 bool loadSettings() {
   // Open settings file
   File file = LittleFS.open("/settings.json", "r");
@@ -138,32 +177,67 @@ bool loadSettings() {
   file.close();
 
   // Parse JSON data
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<2048> doc;
   DeserializationError error = deserializeJson(doc, buf.get());
   if (error) {
     Serial.println("Failed to parse JSON");
     return false;
   }
 
-  // Copy settings from JSON to settings struct
-  strcpy(settings.ssid, doc["ssid"]);
-  strcpy(settings.password, doc["password"]);
+  strcpy(ssid, doc["ssid"]);
+  strcpy(password, doc["password"]);
+
+  smartFlowListenActive = doc["isSmartFlowActive"].as<bool>();
+  isBuzzerActive = doc["isBuzzerActive"].as<bool>();
+  timerSeconds = doc["timer"][0].as<int>();
+  timerAction = doc["timer"][1].as<int>();
+  timerState = doc["timer"][2].as<int>();
+  lastTimerState = timerState;
+  oneMinuteSaveCounter = 0;
+
+  Serial.print("Timer Seconds: ");
+  Serial.println(timerSeconds);
+  Serial.print("Timer Action: ");
+  Serial.println(timerAction);
+  Serial.print("Timer State: ");
+  Serial.println(timerState ? "ON" : "OFF");
+
+  // Load tank settings
+  for (int i = 0; i < 3; ++i) {
+    JsonObject tank = doc["tanks"][i];
+
+    // Extract tank settings from JSON
+    String tankName = String(tank["tankName"].as<const char*>());
+    int min = tank["smartFlow"]["min"];
+    int max = tank["smartFlow"]["max"];
+    int tol = tank["smartFlow"]["tol"];
+    bool isActive = tank["smartFlow"]["isActive"].as<bool>();
+    tanks[i].init(min, max, tol, tankName, isActive);
+
+    float height = static_cast<float>(tank["height"].as<int>()) / 100.0;
+    sensors[i].setTankHeight(height);
+  }
+
 
   // WiFi Static Ip Config
-  const char* ipStr = doc["ip"];
-  const char* gatewayStr = doc["gateway"];
-  const char* subnetStr = doc["subnet"];
-  const char* dns1Str = doc["dns1"];
-  const char* dns2Str = doc["dns2"];
+  if (WiFi.status() != WL_CONNECTED) {
+    const char* ipStr = doc["ip"];
+    const char* gatewayStr = doc["gateway"];
+    const char* subnetStr = doc["subnet"];
+    const char* dns1Str = doc["dns1"];
+    const char* dns2Str = doc["dns2"];
 
-  IPAddress ip, gateway, subnet, dns1, dns2;
-  if (!ip.fromString(ipStr) || !gateway.fromString(gatewayStr) ||
-    !subnet.fromString(subnetStr) || !dns1.fromString(dns1Str) || !dns2.fromString(dns2Str)) {
-    Serial.println("Failed to convert IP address strings");
-    return false;
+    IPAddress ip, gateway, subnet, dns1, dns2;
+    if (!ip.fromString(ipStr) || !gateway.fromString(gatewayStr) ||
+      !subnet.fromString(subnetStr) || !dns1.fromString(dns1Str) || !dns2.fromString(dns2Str)) {
+      Serial.println("Failed to convert IP address strings");
+      return false;
+    }
+    WiFi.config(ip, gateway, subnet, dns1, dns2);
   }
-  WiFi.config(ip, gateway, subnet, dns1, dns2);
 
+  Serial.println("Settings Loaded Successfully!");
+  Serial.println();
   return true;
 }
 
@@ -172,14 +246,13 @@ void connectToWifi() {
   if (wifiConnectionState == "DISCONNECTED") {
     Serial.println("");
     Serial.print("Connecting to SSID: ");
-    Serial.println(settings.ssid);
+    Serial.println(ssid);
     Serial.print("Password: ");
-    Serial.println(settings.password);
+    Serial.println(password);
 
     Serial.println();
 
-    // WiFi.config(settings.ip, settings.gateway, settings.subnet, settings.dns1, settings.dns2);
-    WiFi.begin(settings.ssid, settings.password);
+    WiFi.begin(ssid, password);
   }
 
   wifiConnectionState = "CONNECTING";
@@ -194,11 +267,12 @@ void connectToWifi() {
 void startWiFiManagerConfigPortal() {
   wm.resetSettings();
 
-  IPAddress staticIP(192, 168, 0, 199); // Set your desired static IP address
-  IPAddress gateway(192, 168, 0, 1);    // Set your gateway IP address
-  IPAddress subnet(255, 255, 255, 0);   // Set your subnet mask
-  IPAddress dns1(8, 8, 8, 8);           // Set your DNS server IP address
-  IPAddress dns2(8, 8, 4, 4);           // Set your DNS server IP address
+  IPAddress staticIP(192, 168, 0, 199);
+  IPAddress gateway(192, 168, 0, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  IPAddress dns1(8, 8, 8, 8);
+  IPAddress dns2(8, 8, 4, 4); 
+
   wm.setSTAStaticIPConfig(staticIP, gateway, subnet, dns1, dns2);
 
   // set configportal timeout 
@@ -213,7 +287,7 @@ void startWiFiManagerConfigPortal() {
   }
   buzzerSFX(1);
 
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<800> doc;
   doc["ssid"] = WiFi.SSID();
   doc["password"] = WiFi.psk();
   
@@ -224,7 +298,7 @@ void startWiFiManagerConfigPortal() {
   doc["dns2"] = WiFi.dnsIP(1).toString();
 
   isWiFiSetupCompleted = false;
-  saveSettings(doc);
+  saveSettings(doc, "modify");
 }
 void handleWiFiConnected() {
   if (!isWiFiSetupCompleted) {
@@ -284,14 +358,21 @@ void handleServerRequests() {
   server.on("/src/scrollAnchor.png", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(LittleFS, "/src/scrollAnchor.png", "image/png");
   });
+  server.on("/src/alarm.mp3", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/src/alarm.mp3", "audio/mpeg");
+  });
   server.on("/percentage", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/plain", getPercentage().c_str());
+  });
+  server.on("/timer", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/plain", getTimer().c_str());
   });
 }
 
 
 // Utility Functions
 void buzzerSFX(int iterationCount) {
+  if (!isBuzzerActive) return;
   for (unsigned i = 0; i < iterationCount; ++i) {
     digitalWrite(buzzer, HIGH);
     delay(1000);
@@ -302,12 +383,13 @@ void buzzerSFX(int iterationCount) {
 void sendWSData(String name, String data, String reason = "") {
   String jsonString = "";
   JsonObject object = doc_tx.to<JsonObject>();
+  
   object["name"] = name;
   object["data"] = data;
-  if (reason) {
-    object["reason"] = reason;
-  }
+  if (reason != "") object["reason"] = reason;
+
   serializeJson(doc_tx, jsonString);
+  Serial.print("-> Sent Server Message: ");
   Serial.println(jsonString);
   webSocket.broadcastTXT(jsonString);
 }
@@ -325,7 +407,10 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
         const char* commandName = doc_rx["name"];
         const char* commandData = doc_rx["data"];
 
-        Serial.println(commandData);
+        Serial.print("<- Got Server Message: ");
+        serializeJson(doc_rx, Serial);
+        Serial.println();
+
         if (String(commandName) == "GET_PUMP_STATE") {
           sendWSData("GET_PUMP_STATE", getRelayState());
           return;
@@ -347,27 +432,31 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
           }
           return;
         }
+        if (String(commandName) == "RESET_SENSORS") {
+          for (UltrasonicSensor &sensor : sensors) {
+            sensor.reset();
+          }
+        }
+        if (String(commandName) == "TIMER") {
+          timerState = doc_rx["data"].as<const bool>();
+          Serial.print("Is timer active: ");
+          Serial.println(timerState);
+        }
+        if (String(commandName) == "SETTINGS") {
+          // Parse the received JSON data
+          StaticJsonDocument<800> settingsJson;
+          DeserializationError settingsError = deserializeJson(settingsJson, commandData);
+          if (settingsError) {
+            Serial.println("ERR: Failed to parse settings JSON");
+            return;
+          }
+          saveSettings(settingsJson, "write");
+          loadSettings();
+        }
       }
 
       break;
   }
-}
-void saveSettings(StaticJsonDocument<256> doc) {
-  File file = LittleFS.open("/settings.json", "w");
-  if (!file) {
-    Serial.println("Failed to open settings file for writing");
-    return;
-  }
-
-  // Serialize JSON to file
-  if (serializeJson(doc, file) == 0) {
-    Serial.println("Failed to write JSON to settings file");
-    file.close();
-    return;
-  }
-
-  file.close();
-  Serial.println("Settings updated successfully");  
 }
 void setPumpState(String state) {
   Serial.print("Pump Going To ");
@@ -411,15 +500,21 @@ void smartFlowListen() {
   // 3 Tank Priority Based Smart Flow Mode
   // Do Not Run If State Was Already Set To OFF
   if (!loopBreak) {
-    if (tanks[0].tolCondition) { // Tank 1
+    if (!tanks[0].isActive) {
+      state = "ON";
+    } else if (tanks[0].tolCondition) { // Tank 1
       reason = tanks[0].reason;
 
-      if (tanks[1].tolCondition) {
+      if (!tanks[1].isActive) {
+        state = "ON";
+      } else if (tanks[1].tolCondition) {
         if (lastReason.indexOf(tanks[1].name) != -1) { // Tank 2
           reason = tanks[1].reason;
         }
-        
-        if (tanks[2].tolCondition) {
+
+        if (!tanks[2].isActive) {
+          state = "ON";
+        } else if (tanks[2].tolCondition) {
           if (lastReason.indexOf(tanks[2].name) != -1) { // Tank 3
             reason = tanks[2].reason;
           }
@@ -436,11 +531,10 @@ void smartFlowListen() {
 }
 
 void doubleclick () {
+  Serial.println("Double Clicked!");
   if (getRelayState() == "ON") {
-    Serial.println("Turining off the pump");
     setPumpState("OFF");
   } else if (getRelayState() == "OFF") {
-    Serial.println("Turining on the pump");
     setPumpState("ON");
   }
   smartFlowListenActive = false;
@@ -453,10 +547,14 @@ void singleclick () {
   Serial.println("Single Clicked!");
   buzzerSFX(1);
   smartFlowListenActive = !smartFlowListenActive;
-  Serial.printf("smartFlowListenActive: %d \n", smartFlowListenActive);
-  delay(2000);
+  Serial.print("Smart Flow Turned ");
+  Serial.println(smartFlowListenActive ? "ON" : "OFF");
+  for (UltrasonicSensor &sensor : sensors) {
+    sensor.reset();
+  }
 }
 void longclick () {
+  Serial.println("Long Pressed!");
   digitalWrite(autoPumpIndicator, LOW);
   buzzerSFX(4);
   startWiFiManagerConfigPortal();
@@ -482,24 +580,6 @@ void handleSensorLoop(unsigned long currentMillis) {
     }
   }
 }
-void handleSmartFlowLoop(unsigned long currentMillis) {
-  // Same interval as the sensors
-  if ((currentMillis - smartFlowPreviousMillis >= smartFlowInterval)) {
-    smartFlowPreviousMillis = currentMillis;
-    if (smartFlowListenActive) {
-      if (digitalRead(autoPumpIndicator) == LOW) {
-        digitalWrite(autoPumpIndicator, HIGH);
-        sendWSData("SMART_FLOW_STATE", "ON");
-      }
-      smartFlowListen();
-    } else {
-      if (digitalRead(autoPumpIndicator) == HIGH) {
-        digitalWrite(autoPumpIndicator, LOW);
-        sendWSData("SMART_FLOW_STATE", "OFF");
-      }
-    }
-  }
-}
 void handleWiFiLoop(unsigned long currentMillis) {
   if (WiFi.status() == WL_CONNECTED) {
       handleWiFiConnected();
@@ -508,17 +588,113 @@ void handleWiFiLoop(unsigned long currentMillis) {
       wifiConnectionPreviousMillis = currentMillis;
       connectToWifi();
     }
-    digitalWrite(2, HIGH);
+    // digitalWrite(2, HIGH);
   } 
 }
+void handleSmartFlowLoop(unsigned long currentMillis) {
+  // Same interval as the sensors
+  if ((currentMillis - smartFlowPreviousMillis >= smartFlowInterval)) {
+    smartFlowPreviousMillis = currentMillis;
+    if (smartFlowListenActive) {
+      if (digitalRead(autoPumpIndicator) == LOW) {
+        digitalWrite(autoPumpIndicator, HIGH);
+        sendWSData("SMART_FLOW_STATE", "ON");
 
+        StaticJsonDocument<800> doc;
+        doc["isSmartFlowActive"] = true;
+        saveSettings(doc, "modify");
+      }
+      smartFlowListen();
+    } else {
+      if (digitalRead(autoPumpIndicator) == HIGH) {
+        digitalWrite(autoPumpIndicator, LOW);
+        sendWSData("SMART_FLOW_STATE", "OFF");
+
+        StaticJsonDocument<800> doc;
+        doc["isSmartFlowActive"] = false;
+        saveSettings(doc, "modify");
+      }
+    }
+  }
+}
+void handleTimerLoop(unsigned long currentMillis) {
+  if (timerState && timerSeconds >= 0 && (currentMillis - timerPreviousMillis >= timerInterval)) {
+    timerPreviousMillis = currentMillis;
+    timerSeconds--;
+    oneMinuteSaveCounter++;
+    Serial.print("- Timer Tick: ");
+    Serial.println(timerSeconds);
+    
+    // digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    if (timerSeconds == -1) {
+      timerState = false;
+      switch (timerAction) {
+        case 0:
+          setPumpState("OFF");
+          smartFlowListenActive = false;
+          break;
+        case 1:
+          setPumpState("ON");
+          smartFlowListenActive = false;
+          break;
+        case 2:
+          smartFlowListenActive = false;
+          break;
+        case 3:
+          smartFlowListenActive = true;
+          break;
+        case 4:
+          setPumpState(getRelayState() == "ON" ? "OFF" : "ON");
+          break;
+        case 5:
+          smartFlowListenActive = !smartFlowListenActive;
+        default:
+          break;
+      }
+      // digitalWrite(LED_BUILTIN, LOW);
+      StaticJsonDocument<800> doc;
+      doc["timer"][0] = -1;
+      doc["timer"][1] = -1;
+      doc["timer"][2] = false;
+      saveSettings(doc, "modify");
+
+      timerState = false;
+      timerAction = -1;
+      oneMinuteSaveCounter = 0;
+      sendWSData("TIMER_STATE", "OFF");
+    } else if (oneMinuteSaveCounter >= 60) {
+      oneMinuteSaveCounter = 0;
+      
+      StaticJsonDocument<800> doc;
+      doc["timer"][0] = timerSeconds;
+      doc["timer"][1] = timerAction;
+      doc["timer"][2] = timerState;
+      saveSettings(doc, "modify");
+    }
+  }
+  
+  if (lastTimerState != timerState) {
+    StaticJsonDocument<800> doc;
+    doc["timer"][0] = timerSeconds;
+    doc["timer"][1] = timerAction;
+    doc["timer"][2] = timerState;
+    saveSettings(doc, "modify");
+  }
+  lastTimerState = timerState;
+}
 
 void setup() {
   delay(5000); // For Testing purposses only!!!
-
   Serial.begin(115200);
-  initializePins();
+  Serial.println();
+  Serial.println("======================================");
+  Serial.println("============= WaveWatch ==============");
+  Serial.println("======================================");
+  Serial.println("An IOT Based Automatic Pump Controller");
+  Serial.println();
+
   mountFileSystem();
+  initializePins();
   handleButtonPress();
   getRelayState();
 
@@ -529,6 +705,7 @@ void loop() {
 
   handleButtonLoop(currentMillis);
   handleSensorLoop(currentMillis);
-  handleSmartFlowLoop(currentMillis);
   handleWiFiLoop(currentMillis);
+  handleSmartFlowLoop(currentMillis);
+  handleTimerLoop(currentMillis);
 }

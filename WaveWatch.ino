@@ -13,14 +13,18 @@
 #include <ultrasonicSensor.h>
 #include <SmartFlowTank.h>
 
-const int relayPump = D0;
-const int buzzer = D1;
-const int autoPumpIndicator = D8;
+bool useSerialMonitor = false;
 
-bool isFirstBoot = true;
+const int relayPump = 5; // D1
+const int buzzer = 1; // TX
+const int autoPumpIndicator = 0; // D3
+const int relayStateIndicator = 2; // D4
+
+bool isFirstBoot1 = true;
+bool isFirstBoot2 = true;
 
 bool isWiFiSetupCompleted = false;
-const int wifiManagerTimeout = 120; // Timeout for on demand config portal in seconds
+const int wifiManagerTimeout = 220; // Timeout for on demand config portal in seconds
 unsigned long wifiConnectionStartTime = millis();
 
 // Loop Interval milliseconds
@@ -46,11 +50,12 @@ bool timerState = false;
 int timerSeconds = -1;
 int timerAction = -1;
 int oneMinuteSaveCounter = 0;
+bool isSensorErrorAtCurrentIteration = false;
 
-                                          // trig | echo | height |
-UltrasonicSensor sensor1(0, 4, 0.6);      // D3   | D2   | 0.6    |
-UltrasonicSensor sensor2(2, 14, 0.6);     // D4   | D5   | 0.6    |
-UltrasonicSensor sensor3(13, 12, 0.6);    // D7   | D6   | 0.6    |
+                                    // ping | height |
+UltrasonicSensor sensor1(12, 0.6);  // D6   | 0.6    |
+UltrasonicSensor sensor2(15, 0.6);  // D8   | 0.6    |
+UltrasonicSensor sensor3(4, 0.6);   // D2   | 0.6    |
 int sensIterations = 10;
 
 SmartFlowTank tank1(0, 90, -50, "Tank 1");
@@ -68,7 +73,8 @@ WebSocketsServer webSocket = WebSocketsServer(81);
 StaticJsonDocument<200> doc_tx;
 StaticJsonDocument<200> doc_rx;
 
-OneButton button(A0, false); 
+OneButton button1(A0, false); 
+OneButton button2(3, false, false); 
 
 String state = "OFF"; // Initial Pump State
 String wifiConnectionState = "DISCONNECTED";
@@ -91,16 +97,19 @@ String getTimer() {
 }
 String getRelayState() {
   String relayState = "";
-  digitalRead(relayPump) ? relayState = "ON" : relayState = "OFF";
+  digitalRead(relayPump) ? relayState = "OFF" : relayState = "ON";
+  digitalWrite(relayStateIndicator, relayState == "ON");
   return relayState;
 }
 
 // Setup Functions
 void initializePins() {
   pinMode(relayPump, OUTPUT);
-  pinMode(buzzer, OUTPUT);
+  if (!useSerialMonitor) pinMode(buzzer, OUTPUT);
+  pinMode(3, INPUT);
   pinMode(autoPumpIndicator, OUTPUT);
-  pinMode(2, OUTPUT);
+  pinMode(relayStateIndicator, OUTPUT);
+  Serial.println("Pins initialized successfully!");
 }
 void mountFileSystem() {
   LittleFS.begin();
@@ -113,9 +122,13 @@ void mountFileSystem() {
   }
 }
 void handleButtonPress() {
-  button.attachClick(singleclick);
-  button.attachDoubleClick(doubleclick);
-  button.attachLongPressStop(longclick);
+  button1.attachClick(btn1singleclick);
+  button1.attachDoubleClick(btn1doubleclick);
+  button1.attachLongPressStop(btn1longclick);
+  button2.attachClick(btn2singleclick);
+  button2.attachDoubleClick(btn2doubleclick);
+  button2.attachLongPressStop(btn2longclick);
+  Serial.println("Buttons initialized successfully!");
 }
 void saveSettings(StaticJsonDocument<800> doc, String saveType) {
   File settingsFile;
@@ -165,6 +178,7 @@ bool loadSettings() {
 
   // Read settings from file
   size_t size = file.size();
+  Serial.println("Size: " + (String) size);
   if (size == 0) {
     Serial.println("Settings file is empty");
     file.close();
@@ -256,8 +270,8 @@ void connectToWifi() {
   }
 
   wifiConnectionState = "CONNECTING";
-  if (millis() - wifiConnectionStartTime > 10000) {
-    // If connection attempt takes more than 10 seconds, assume failure
+  if (millis() - wifiConnectionStartTime > 20000) {
+    // If connection attempt takes more than 20 seconds, assume failure
     Serial.println("Failed to connect to WiFi. Enter setup mode.");
     wifiConnectionState = "FAILURE";
     return;
@@ -372,7 +386,7 @@ void handleServerRequests() {
 
 // Utility Functions
 void buzzerSFX(int iterationCount) {
-  if (!isBuzzerActive) return;
+  if (useSerialMonitor || !isBuzzerActive) return;
   for (unsigned i = 0; i < iterationCount; ++i) {
     digitalWrite(buzzer, HIGH);
     delay(1000);
@@ -463,10 +477,12 @@ void setPumpState(String state) {
   Serial.println(state);
   if (state == "OFF") {
     buzzerSFX(3);
-    digitalWrite(relayPump, LOW);
+    digitalWrite(relayPump, HIGH);
+    digitalWrite(relayStateIndicator, LOW);
   } else {
     buzzerSFX(2);
-    digitalWrite(relayPump, HIGH);
+    digitalWrite(relayPump, LOW);
+    digitalWrite(relayStateIndicator, HIGH);
   }
   sendWSData("PUMP_STATE", state);
 }
@@ -530,34 +546,52 @@ void smartFlowListen() {
   setPumpState(state);
 }
 
-void doubleclick () {
-  Serial.println("Double Clicked!");
-  if (getRelayState() == "ON") {
-    setPumpState("OFF");
-  } else if (getRelayState() == "OFF") {
-    setPumpState("ON");
-  }
-  smartFlowListenActive = false;
+void btn1doubleclick () {
+  Serial.println("Btn 1 Double Clicked!");
 }
-void singleclick () {
-  if (isFirstBoot) {
-    isFirstBoot = false;
+void btn1singleclick () {
+  if (isFirstBoot1) {
+    isFirstBoot1 = false;
     return;
   }
-  Serial.println("Single Clicked!");
+  Serial.println("Btn 1 Single Clicked!");
   buzzerSFX(1);
   smartFlowListenActive = !smartFlowListenActive;
   Serial.print("Smart Flow Turned ");
   Serial.println(smartFlowListenActive ? "ON" : "OFF");
-  for (UltrasonicSensor &sensor : sensors) {
-    sensor.reset();
-  }
 }
-void longclick () {
-  Serial.println("Long Pressed!");
-  digitalWrite(autoPumpIndicator, LOW);
-  buzzerSFX(4);
-  startWiFiManagerConfigPortal();
+void btn1longclick () {
+  Serial.println("Btn 1 Long Pressed!");
+  setPumpState("OFF");
+  smartFlowListenActive = false;
+}
+void btn2doubleclick () {
+  Serial.println("Btn 2 Double Clicked!");
+  isBuzzerActive = !isBuzzerActive;
+  buzzerSFX(1);
+  Serial.print("Buzzer Turned ");
+  Serial.println(isBuzzerActive ? "ON" : "OFF");
+}
+void btn2singleclick () {
+  if (isFirstBoot2) {
+    isFirstBoot2 = false;
+    return;
+  }
+  Serial.println("Btn 2 Single Clicked!");
+  for (UltrasonicSensor &sensor : sensors) sensor.reset();
+  Serial.println("Sensors Reseted");
+}
+void btn2longclick () {
+  if (button1.isLongPressed()) {
+    Serial.println("Reseting Controller");
+    buzzerSFX(4);
+    digitalWrite(autoPumpIndicator, LOW);
+    startWiFiManagerConfigPortal();
+    return;
+  }
+  Serial.println("Btn 2 Long Pressed!");
+  setPumpState("ON");
+  smartFlowListenActive = false;
 }
 
 
@@ -566,18 +600,21 @@ void handleButtonLoop(unsigned long currentMillis) {
   // Button interval 10ms
   if (currentMillis - buttonPreviousMillis >= buttonInterval) {
     buttonPreviousMillis = currentMillis;
-    button.tick(analogRead(button.pin()) / 1024);
+    button1.tick(analogRead(button1.pin()) / 1024);
+    button2.tick(digitalRead(button2.pin()));
   }
 }
 void handleSensorLoop(unsigned long currentMillis) {
   // Sensor interval 100ms
   if ((currentMillis - sensorPreviousMillis >= sensorInterval)) {
     sensorPreviousMillis = currentMillis;
-
+    bool isErrorInAny1Sensor = false;
     for (UltrasonicSensor &sensor : sensors) {
       sensor.sense();
       sensor.getPercentage(sensIterations);
+      if (sensor.isSensorErrorDetected and !sensor.isDisabled) isErrorInAny1Sensor = true;
     }
+    isSensorErrorAtCurrentIteration = isErrorInAny1Sensor;
   }
 }
 void handleWiFiLoop(unsigned long currentMillis) {
@@ -588,7 +625,6 @@ void handleWiFiLoop(unsigned long currentMillis) {
       wifiConnectionPreviousMillis = currentMillis;
       connectToWifi();
     }
-    // digitalWrite(2, HIGH);
   } 
 }
 void handleSmartFlowLoop(unsigned long currentMillis) {
@@ -596,7 +632,7 @@ void handleSmartFlowLoop(unsigned long currentMillis) {
   if ((currentMillis - smartFlowPreviousMillis >= smartFlowInterval)) {
     smartFlowPreviousMillis = currentMillis;
     if (smartFlowListenActive) {
-      if (digitalRead(autoPumpIndicator) == LOW) {
+      if (digitalRead(autoPumpIndicator) == LOW and !isSensorErrorAtCurrentIteration) {
         digitalWrite(autoPumpIndicator, HIGH);
         sendWSData("SMART_FLOW_STATE", "ON");
 
@@ -605,15 +641,13 @@ void handleSmartFlowLoop(unsigned long currentMillis) {
         saveSettings(doc, "modify");
       }
       smartFlowListen();
-    } else {
-      if (digitalRead(autoPumpIndicator) == HIGH) {
-        digitalWrite(autoPumpIndicator, LOW);
-        sendWSData("SMART_FLOW_STATE", "OFF");
+    } else if (digitalRead(autoPumpIndicator) == HIGH and !isSensorErrorAtCurrentIteration) {
+      digitalWrite(autoPumpIndicator, LOW);
+      sendWSData("SMART_FLOW_STATE", "OFF");
 
-        StaticJsonDocument<800> doc;
-        doc["isSmartFlowActive"] = false;
-        saveSettings(doc, "modify");
-      }
+      StaticJsonDocument<800> doc;
+      doc["isSmartFlowActive"] = false;
+      saveSettings(doc, "modify");
     }
   }
 }
@@ -684,7 +718,6 @@ void handleTimerLoop(unsigned long currentMillis) {
 }
 
 void setup() {
-  delay(5000); // For Testing purposses only!!!
   Serial.begin(115200);
   Serial.println();
   Serial.println("======================================");

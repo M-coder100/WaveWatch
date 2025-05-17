@@ -729,7 +729,7 @@ void setup() {
   mountFileSystem();
   initializePins();
   handleButtonPress();
-  getRelayState();
+  getRelayState();  
 
   loadSettings();
 }

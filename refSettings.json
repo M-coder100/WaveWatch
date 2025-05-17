@@ -1,0 +1,53 @@
+{
+    "ssid": "your SSID",
+    "password": "your password",
+    "ip": "192.168.0.199",
+    "gateway": "192.168.0.1",
+    "subnet": "255.255.255.0",
+    "dns1": "8.8.8.8",
+    "dns2": "8.8.4.4",
+    "isSmartFlowActive": true,
+    "isBuzzerActive": true,
+    "timer": [-1, -1, false],
+    "tanks": [
+        {
+            "tankName": "Pump Tank",
+            "tankTagName": "",
+            "height": 50,
+            "diameter": 100,
+            "maxLiters": 2000,
+            "smartFlow": {
+                "isActive": true,
+                "min": 10,
+                "tol": 50,
+                "max": 100
+            }
+        },
+        {
+            "tankName": "Overflow Tank",
+            "tankTagName": "",
+            "height": 50,
+            "diameter": 100,
+            "maxLiters": 1000,
+            "smartFlow": {
+                "isActive": true,
+                "min": 0,
+                "tol": -50,
+                "max": 90
+            }
+        },
+        {
+            "tankName": "Monitor Tank",
+            "tankTagName": "",
+            "height": 150,
+            "diameter": 110,
+            "maxLiters": 2000,
+            "smartFlow": {
+                "isActive": false,
+                "min": 0,
+                "tol": 0,
+                "max": 100
+            }
+        }
+    ]
+}
